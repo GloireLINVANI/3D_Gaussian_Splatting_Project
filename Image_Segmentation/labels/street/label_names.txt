@@ -1,0 +1,7 @@
+_background_
+Car1
+Car2
+Car3
+lamp1
+tree1
+tree2
