@@ -2,6 +2,7 @@ import numpy as np
 from transformers import pipeline
 from PIL import Image
 import requests
+import random
 
 """
 This file is about to evaluate the succes of the segmentation model. It compares a mask of a segmented object
@@ -53,6 +54,20 @@ def get_ious_from_masks(masks, ground_truths):
         max_ious.append((max_iou, gt_idx))
     
     return max_ious
+
+
+def generate_segmentation_map(masks):
+    """
+    masks: a list of masks
+    returns an image that corresponds to segmentation map
+    """
+    segmentation_map = np.zeros((masks[0].shape[0], masks[0].shape[1], 3))
+    for mask in masks:
+        color = [random.random(), random.random(), random.random()]
+        segmentation_map[mask != 0, :] = color
+
+    return segmentation_map
+
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+_background_
+Lego 1
+Lego 2
+table 1
+vase 1
+vase 2
+wall 1
