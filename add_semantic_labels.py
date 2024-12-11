@@ -1,4 +1,5 @@
 import argparse
+import colorsys
 import json
 import os
 
@@ -94,17 +95,70 @@ def segment_image(image_path, output_dir, processor, model, device):
         seg_map = outputs.logits.argmax(dim=1)[0].cpu().numpy()
 
     # print("Segmentation map size:", seg_map.shape)
+    # sys.exit()
 
     # Saving segmentation map
     base_filename = os.path.splitext(os.path.basename(image_path))[0]
 
     np.save(os.path.join(output_dir, f"{base_filename}_segmap.npy"), seg_map)
 
-    plt.figure(figsize=(10, 10))
-    plt.imshow(seg_map)
+    def create_ade20k_label_colormap():
+        """Creates a colormap for the ADE20K dataset classes plus unknown label."""
+        num_classes = 150
+        # Create colormap with an extra slot for unknown (-1)
+        colormap = np.zeros((num_classes + 1, 3), dtype=np.uint8)
+
+        # Set a specific color for unknown label (black)
+        colormap[0] = [0, 0, 0]  # Black for unknown
+
+        # Generate colors for actual classes
+        for i in range(num_classes):
+            # Generate distinct colors using HSV color space
+            h = i / num_classes
+            s = 0.8 + (i % 2) * 0.2  # Alternate between 0.8 and 1.0 saturation
+            v = 0.6 + (i % 3) * 0.2  # Vary value between 0.6, 0.8, and 1.0
+
+            # Convert HSV to RGB
+            c = colorsys.hsv_to_rgb(h, s, v)
+            colormap[i + 1] = np.array(c) * 255
+        return colormap
+
+    # Create colored segmentation map
+    colormap = create_ade20k_label_colormap()
+
+    # Shift labels to handle -1
+    # Convert -1 to 0, and shift other labels up by 1
+    visualization_map = seg_map.copy()
+    visualization_map = visualization_map + 1  # Shift all labels up by 1
+
+    colored_seg_map = colormap[visualization_map]
+
+    # Save visualization with original image side by side
+    plt.figure(figsize=(20, 10))
+
+    # Original image
+    plt.subplot(1, 2, 1)
+    plt.imshow(image)
+    plt.title('Original Image')
     plt.axis('off')
-    plt.savefig(os.path.join(output_dir, f"{base_filename}_segmap.png"), bbox_inches='tight', pad_inches=0)
+
+    # Colored segmentation map
+    plt.subplot(1, 2, 2)
+    plt.imshow(colored_seg_map.astype(np.uint8))
+    plt.title('Segmentation Map')
+    plt.axis('off')
+
+    plt.savefig(os.path.join(output_dir, f"{base_filename}_segmentation_comparison.png"), bbox_inches='tight',
+                pad_inches=0.1, dpi=300)
     plt.close()
+
+    # Save only the colored segmentation map
+    # plt.figure(figsize=(10, 10))
+    # plt.imshow(colored_seg_map.astype(np.uint8))
+    # plt.axis('off')
+    # plt.savefig(os.path.join(output_dir, f"{base_filename}_segmap_colored.png"), bbox_inches='tight', pad_inches=0,
+    #             dpi=300)
+    # plt.close()
 
     return seg_map
 
@@ -124,10 +178,11 @@ def assign_semantic_labels(gaussians, cameras, input_dir, output_dir):
 
     # Processing each camera view
     for camera in cameras:
-        img_path = os.path.join(input_dir, camera["img_name"])
+        img_path = os.path.join(input_dir, camera["img_name"] + ".png")
         if not os.path.exists(img_path):
             print(f"Warning: Image {camera['img_name']} not found")
             continue
+        print(f"Processing image {os.path.basename(img_path)}...")
         image = Image.open(img_path)
 
         # Getting original image size
@@ -200,7 +255,7 @@ def save_labeled_ply(output_file, plydata, labels):
 
     # Creating new PLY element and file
     vertex_element = PlyElement.describe(new_vertices, 'vertex')
-    PlyData([vertex_element], text=True).write(output_file)
+    PlyData([vertex_element]).write(output_file)
 
 
 def main():
