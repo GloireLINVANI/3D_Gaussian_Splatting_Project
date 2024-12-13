@@ -1,0 +1,19 @@
+_background_
+Carpet
+TV
+bowl
+curtain
+curtain2
+floor
+floor2
+floor3
+floor4
+glass
+keyboard
+seat
+seat2
+slipper
+speaker
+speaker2
+teddy bear
+vase
