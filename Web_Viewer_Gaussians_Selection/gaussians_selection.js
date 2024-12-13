@@ -5,7 +5,7 @@ let viewMatrix = defaultViewMatrix;
 let selectionMode = false;  // Controls if selection mode is active
 const NO_SELECTION = -999999;  // A value that won't match any real label
 let selectedLabel = NO_SELECTION;  // Currently selected label
-let displacementManager; 
+let displacementManager;
 
 const Z_NEAR = 0.2;
 const Z_FAR = 200;
@@ -242,7 +242,7 @@ function createWorker(self) {
     let lastVertexCount = 0;
     let labelData;  // New array to store labels
     let displacementMap = new Map(); // label -> (x,y,z) offset
-    let visibilityMap = new Map(); 
+    let visibilityMap = new Map();
 
     var _floatView = new Float32Array(1);
     var _int32View = new Int32Array(_floatView.buffer);
@@ -279,46 +279,48 @@ function createWorker(self) {
     function packHalf2x16(x, y) {
         return (floatToHalf(x) | (floatToHalf(y) << 16)) >>> 0;
     }
+
     function resetAllVisibility() {
         visibilityMap.clear();
         generateTexture(); // Regenerate texture with all objects visible
     }
+
     function generateTexture() {
         if (!buffer) return;
         const f_buffer = new Float32Array(buffer);
         const u_buffer = new Uint8Array(buffer);
-    
+
         var texwidth = 1024 * 2;
         var texheight = Math.ceil((2 * vertexCount) / texwidth);
         var texdata = new Uint32Array(texwidth * texheight * 4);
         var texdata_c = new Uint8Array(texdata.buffer);
         var texdata_f = new Float32Array(texdata.buffer);
-    
+
         if (!labelData || labelData.length !== vertexCount) {
             labelData = new Int32Array(vertexCount);
         }
-    
+
         for (let i = 0; i < vertexCount; i++) {
             const label = labelData[i];
             // Check if this splat should be visible
             const isVisible = !visibilityMap.has(label) || visibilityMap.get(label);
-            
+
             // If not visible, set alpha to 0
             const alphaMultiplier = isVisible ? 1 : 0;
-            
-            const displacement = displacementMap.get(label) || { x: 0, y: 0, z: 0 };
-            
+
+            const displacement = displacementMap.get(label) || {x: 0, y: 0, z: 0};
+
             texdata_f[8 * i + 0] = f_buffer[8 * i + 0] + displacement.x;
             texdata_f[8 * i + 1] = f_buffer[8 * i + 1] + displacement.y;
             texdata_f[8 * i + 2] = f_buffer[8 * i + 2] + displacement.z;
             texdata_f[8 * i + 3] = label;
-    
+
             // Apply visibility to alpha channel
             texdata_c[4 * (8 * i + 7) + 0] = u_buffer[32 * i + 24 + 0];
             texdata_c[4 * (8 * i + 7) + 1] = u_buffer[32 * i + 24 + 1];
             texdata_c[4 * (8 * i + 7) + 2] = u_buffer[32 * i + 24 + 2];
             texdata_c[4 * (8 * i + 7) + 3] = u_buffer[32 * i + 24 + 3] * alphaMultiplier;
-    
+
             // Rest of the texture generation remains the same
             let scale = [f_buffer[8 * i + 3 + 0], f_buffer[8 * i + 3 + 1], f_buffer[8 * i + 3 + 2]];
             let rot = [
@@ -327,7 +329,7 @@ function createWorker(self) {
                 (u_buffer[32 * i + 28 + 2] - 128) / 128,
                 (u_buffer[32 * i + 28 + 3] - 128) / 128
             ];
-    
+
             // Matrix calculations remain the same...
             const M = [
                 1.0 - 2.0 * (rot[2] * rot[2] + rot[3] * rot[3]),
@@ -340,7 +342,7 @@ function createWorker(self) {
                 2.0 * (rot[2] * rot[3] - rot[0] * rot[1]),
                 1.0 - 2.0 * (rot[1] * rot[1] + rot[2] * rot[2])
             ].map((k, i) => k * scale[Math.floor(i / 3)]);
-    
+
             const sigma = [
                 M[0] * M[0] + M[3] * M[3] + M[6] * M[6],
                 M[0] * M[1] + M[3] * M[4] + M[6] * M[7],
@@ -349,16 +351,16 @@ function createWorker(self) {
                 M[1] * M[2] + M[4] * M[5] + M[7] * M[8],
                 M[2] * M[2] + M[5] * M[5] + M[8] * M[8]
             ];
-    
+
             texdata[8 * i + 4] = packHalf2x16(4 * sigma[0], 4 * sigma[1]);
             texdata[8 * i + 5] = packHalf2x16(4 * sigma[2], 4 * sigma[3]);
             texdata[8 * i + 6] = packHalf2x16(4 * sigma[4], 4 * sigma[5]);
         }
-    
+
         self.postMessage({texdata, texwidth, texheight}, [texdata.buffer]);
     }
 
-    
+
     // Hit testing function for selection
     function performHitTesting(x, y, viewMatrix, projectionMatrix, viewport) {
         if (!buffer || !labelData) return NO_SELECTION;
@@ -564,8 +566,8 @@ function createWorker(self) {
 
             rgba[3] = types["opacity"] ? (1 / (1 + Math.exp(-attrs.opacity))) * 255 : 255;
 
-            // Storing semantic label
-            labelData[j] = types["semantic_label"] ? attrs.semantic_label : NO_SELECTION
+            // Storing label
+            labelData[j] = types["label"] ? attrs.label : NO_SELECTION
         }
         console.timeEnd("build buffer");
         console.log("Processing complete with vertex count:", vertexCount);
@@ -602,9 +604,8 @@ function createWorker(self) {
 
         } else if (e.data.type === 'resetVisibility') {
             resetAllVisibility();
-            self.postMessage({ type: 'visibilityReset' }); // Notify main thread
-        }
-        else if(e.data.type === 'toggleVisibility') {
+            self.postMessage({type: 'visibilityReset'}); // Notify main thread
+        } else if (e.data.type === 'toggleVisibility') {
             const label = e.data.label;
             if (label !== NO_SELECTION) {
                 visibilityMap.set(label, e.data.visible);
@@ -622,12 +623,12 @@ function createWorker(self) {
         } else if (e.data.type === 'updateDisplacement') {
             // Handle displacement updates
             const {label, dx, dy, dz} = e.data;
-            let displacement = displacementMap.get(label) || { x: 0, y: 0, z: 0 };
+            let displacement = displacementMap.get(label) || {x: 0, y: 0, z: 0};
             displacement.x += dx;
             displacement.y += dy;
             displacement.z += dz;
             displacementMap.set(label, displacement);
-            
+
             // Update positions in the buffer
             if (buffer) {
                 const f_buffer = new Float32Array(buffer);
@@ -642,11 +643,12 @@ function createWorker(self) {
                 }
                 // regenerate the texture after moving things around
                 generateTexture();
-                self.postMessage({ buffer: buffer, vertexCount: vertexCount });
+                self.postMessage({buffer: buffer, vertexCount: vertexCount});
             }
         }
     };
 }
+
 // Original vertex shader code from main.js
 const vertexShaderSource = `#version 300 es
 precision highp float;
@@ -872,8 +874,8 @@ async function main() {
     const gl = canvas.getContext("webgl2", {
         antialias: false,
     });
-    
-    
+
+
     // Setting up framebuffer
     const result = setupFramebuffer(gl);
     if (!result) {
@@ -881,6 +883,7 @@ async function main() {
         return;
     }
     const {framebuffer, colorTexture} = result;
+
     function setupDisplacementUniforms(gl, program) {
         // Get uniform locations
         const uniforms = {
@@ -889,17 +892,17 @@ async function main() {
             u_displacementLabels: gl.getUniformLocation(program, "u_displacementLabels"),
             u_numDisplacements: gl.getUniformLocation(program, "u_numDisplacements")
         };
-        
+
         // Initialize arrays for displacements
         const displacementMap = new Map(); // label -> [x, y, z]
         let activeDisplacements = 0;
-        
+
         // Function to update shader uniforms with current displacements
         function updateDisplacementUniforms() {
             const displacementArray = new Float32Array(300); // 100 vec3s
             const labelArray = new Int32Array(100);
             let index = 0;
-            
+
             for (const [label, displacement] of displacementMap.entries()) {
                 labelArray[index] = label;
                 displacementArray[index * 3] = displacement[0];
@@ -907,33 +910,33 @@ async function main() {
                 displacementArray[index * 3 + 2] = displacement[2];
                 index++;
             }
-            
+
             gl.uniform1i(uniforms.u_enableDisplacement, displacementMap.size > 0);
             gl.uniform3fv(uniforms.u_displacementMap, displacementArray);
             gl.uniform1iv(uniforms.u_displacementLabels, labelArray);
             gl.uniform1i(uniforms.u_numDisplacements, displacementMap.size);
         }
-        
+
         return {
             updateDisplacement: (label, dx = 0, dy = 0, dz = 0) => {
                 if (label === NO_SELECTION) return;
-                
+
                 const current = displacementMap.get(label) || [0, 0, 0];
                 current[0] += dx;
                 current[1] += dy;
                 current[2] += dz;
                 displacementMap.set(label, current);
-                
+
                 updateDisplacementUniforms();
                 saveDisplacements(displacementMap);
             },
-            
+
             resetDisplacements: () => {
                 displacementMap.clear();
                 updateDisplacementUniforms();
                 saveDisplacements(displacementMap);
             },
-            
+
             loadDisplacements: (savedDisplacements) => {
                 displacementMap.clear();
                 for (const [label, displacement] of Object.entries(savedDisplacements)) {
@@ -943,7 +946,7 @@ async function main() {
             }
         };
     }
-    
+
     function loadDisplacements() {
         const saved = localStorage.getItem('splatDisplacements');
         if (saved) {
@@ -951,11 +954,12 @@ async function main() {
             displacementManager.loadDisplacements(displacementsObj);
         }
     }
+
     function updateSplatDisplacement(label, dx = 0, dy = 0, dz = 0) {
         if (label === NO_SELECTION || !displacementManager) return;
         displacementManager.updateDisplacement(label, dx, dy, dz);
     }
-    
+
     function saveDisplacements() {
         const displacementsObj = Object.fromEntries(displacements);
         localStorage.setItem('splatDisplacements', JSON.stringify(displacementsObj));
@@ -963,7 +967,7 @@ async function main() {
 
     function resetAllDisplacements() {
         if (!displacementManager) return;
-        
+
         displacementManager.resetDisplacements();
         console.log("All displacements have been reset");
     }
@@ -997,20 +1001,20 @@ async function main() {
     gl.shaderSource(vertexShader, vertexShaderSource);
     gl.compileShader(vertexShader);
     if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(vertexShader));
-    
+
     // Creating and compiling main fragment shader
     const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
     gl.shaderSource(fragmentShader, fragmentShaderSource);
     gl.compileShader(fragmentShader);
     if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(fragmentShader));
-    
+
     // Creating and linking main program
     const program = gl.createProgram();
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
     gl.useProgram(program);
-    
+
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(program));
     displacementManager = setupDisplacementUniforms(gl, program);
 
@@ -1021,12 +1025,12 @@ async function main() {
     
     
     gl.disable(gl.DEPTH_TEST);
-    
+
     // Enabling blending
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(gl.ONE_MINUS_DST_ALPHA, gl.ONE, gl.ONE_MINUS_DST_ALPHA, gl.ONE,);
     gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
-    
+
     // Getting uniform locations
     // After the other uniform locations...
     const u_projection = gl.getUniformLocation(program, "projection");
@@ -1306,31 +1310,30 @@ async function main() {
     }, {passive: false},);
 
 
+    /*     function updateSplatDisplacement(label, dx = 0, dy = 0, dz = 0) {
+            if (label === NO_SELECTION) return;
 
-/*     function updateSplatDisplacement(label, dx = 0, dy = 0, dz = 0) {
-        if (label === NO_SELECTION) return;
-        
-        // Update displacement map for the specific label
-        const current = displacements.get(label) || [0, 0, 0];
-        current[0] += dx;
-        current[1] += dy;
-        current[2] += dz;
-        displacements.set(label, current);
-        
-        // Save to localStorage
-        saveDisplacements();
-        
-        // Set the uniforms for the currently selected label
-        gl.uniform1i(u_enableDisplacement, 1);
-        gl.uniform3fv(u_displacement, new Float32Array(current));
-        gl.uniform1i(u_selectedLabel, label);
-    } */
+            // Update displacement map for the specific label
+            const current = displacements.get(label) || [0, 0, 0];
+            current[0] += dx;
+            current[1] += dy;
+            current[2] += dz;
+            displacements.set(label, current);
+
+            // Save to localStorage
+            saveDisplacements();
+
+            // Set the uniforms for the currently selected label
+            gl.uniform1i(u_enableDisplacement, 1);
+            gl.uniform3fv(u_displacement, new Float32Array(current));
+            gl.uniform1i(u_selectedLabel, label);
+        } */
 
     // Selection mode toggle
     document.addEventListener('keydown', (e) => {
         carousel = false;
         if (!activeKeys.includes(e.code)) activeKeys.push(e.code);
-        if(e.key === 'Escape') {
+        if (e.key === 'Escape') {
             selectionMode = !selectionMode;
             console.log("Selection mode:", selectionMode ? "enabled" : "disabled");
             gl.uniform1i(u_selectionMode, selectionMode ? 1 : 0);
@@ -1352,7 +1355,7 @@ async function main() {
             resetAllDisplacements();
         }
         if (e.shiftKey && e.code === 'KeyR') {
-            worker.postMessage({ type: 'resetVisibility' });
+            worker.postMessage({type: 'resetVisibility'});
             console.log("Resetting visibility of all objects");
         }
         if (e.code === "KeyC") {  // Reset all colors when pressing 'C'
@@ -1393,8 +1396,8 @@ async function main() {
     });
 
     // State monitoring for debugging
-    const debugState = () => {
-        false && console.log("Render State:", {
+    /*const debugState = () => {
+        console.log("Render State:", {
             vertexCount: vertexCount,
             hasValidContext: !!gl,
             programLinked: gl?.getProgramParameter(program, gl.LINK_STATUS),
@@ -1418,9 +1421,9 @@ async function main() {
                 activeProgram: gl?.getParameter(gl.CURRENT_PROGRAM),
             }
         });
-    };
+    };*/
 
-    debugState();
+    // debugState();
 
     let leftGamepadTrigger, rightGamepadTrigger, actualViewMatrix
 
@@ -1454,14 +1457,14 @@ async function main() {
 
         if (selectionMode && selectedLabel !== NO_SELECTION) {
             const splatMoveSpeed = 0.1; // Adjust speed as needed
-            
+
             if (activeKeys.includes("KeyH")) {
                 updateSplatDisplacement(selectedLabel, -splatMoveSpeed, 0, 0);
             }
             if (activeKeys.includes("KeyK")) {
                 updateSplatDisplacement(selectedLabel, splatMoveSpeed, 0, 0);
             }
-            
+
             // Up/Down
             if (activeKeys.includes("KeyJ")) {
                 updateSplatDisplacement(selectedLabel, 0, splatMoveSpeed, 0);
@@ -1469,7 +1472,7 @@ async function main() {
             if (activeKeys.includes("KeyU")) {
                 updateSplatDisplacement(selectedLabel, 0, -splatMoveSpeed, 0);
             }
-            
+
         }
 
         const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -1536,14 +1539,14 @@ async function main() {
             }
         }
 
-/*         if (["KeyJ", "KeyK", "KeyL", "KeyI"].some((k) => activeKeys.includes(k))) {
-            let d = 4;
-            inv = translateMatrix4(inv, 0, 0, d);
-            inv = rotateMatrix4(inv, activeKeys.includes("KeyJ") ? -0.05 : activeKeys.includes("KeyL") ? 0.05 : 0, 0, 1, 0,);
-            inv = rotateMatrix4(inv, activeKeys.includes("KeyI") ? 0.05 : activeKeys.includes("KeyK") ? -0.05 : 0, 1, 0, 0,);
-            inv = translateMatrix4(inv, 0, 0, -d);
-        }
- */
+        /*         if (["KeyJ", "KeyK", "KeyL", "KeyI"].some((k) => activeKeys.includes(k))) {
+                    let d = 4;
+                    inv = translateMatrix4(inv, 0, 0, d);
+                    inv = rotateMatrix4(inv, activeKeys.includes("KeyJ") ? -0.05 : activeKeys.includes("KeyL") ? 0.05 : 0, 0, 1, 0,);
+                    inv = rotateMatrix4(inv, activeKeys.includes("KeyI") ? 0.05 : activeKeys.includes("KeyK") ? -0.05 : 0, 1, 0, 0,);
+                    inv = translateMatrix4(inv, 0, 0, -d);
+                }
+         */
         viewMatrix = invert4(inv);
 
         if (carousel) {
@@ -1590,13 +1593,15 @@ async function main() {
                 gl.uniform1i(u_enableDisplacement, 1);
                 gl.uniform3fv(u_displacement, new Float32Array(displacement));
             } else {
-                gl.uniform1i(u_enableDisplacement, 0);
-                gl.uniform3fv(u_displacement, new Float32Array([0, 0, 0]));
+                if (!selectionMode) {
+                    gl.uniform1i(u_enableDisplacement, 0);
+                    gl.uniform3fv(u_displacement, new Float32Array([0, 0, 0]));
+                }
             }
 
             gl.clear(gl.COLOR_BUFFER_BIT);
             gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, vertexCount);
-            debugState()
+            //  debugState()
             document.getElementById("spinner").style.display = "none";
             document.getElementById("message").style.display = "none"; // Added this for cleaner UI
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1606,7 +1611,7 @@ async function main() {
             gl.clear(gl.COLOR_BUFFER_BIT);
             //console.log("Drawing", vertexCount, "vertices");
             gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, vertexCount);
-            debugState()
+            //  debugState()
         } else {
             gl.clear(gl.COLOR_BUFFER_BIT);
             document.getElementById("spinner").style.display = "";
@@ -1689,6 +1694,17 @@ async function main() {
     });
 }
 
+function updateSelectionInfo(label) {
+    const infoEl = document.getElementById('selection-info');
+    const objectEl = document.getElementById('selected-object');
+
+    if (label >= 0 && selectionMode) {
+        infoEl.style.display = 'block';
+        objectEl.textContent = label//labels[label];
+    } else {
+        infoEl.style.display = 'none';
+    }
+}
 
 let cameras, camera, labels;
 Promise.all([fetch('cameras.json'), fetch('ade20k-id2label.json')]).then(responses =>
