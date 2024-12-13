@@ -502,8 +502,8 @@ function createWorker(self) {
 
             rgba[3] = types["opacity"] ? (1 / (1 + Math.exp(-attrs.opacity))) * 255 : 255;
 
-            // Storing semantic label
-            labelData[j] = types["semantic_label"] ? attrs.semantic_label : NO_SELECTION
+            // Storing label
+            labelData[j] = types["label"] ? attrs.label : NO_SELECTION
         }
         console.timeEnd("build buffer");
         console.log("Processing complete with vertex count:", vertexCount);
@@ -1523,7 +1523,7 @@ function updateSelectionInfo(label) {
 
     if (label >= 0 && selectionMode) {
         infoEl.style.display = 'block';
-        objectEl.textContent = labels[label];
+        objectEl.textContent = label//labels[label];
     } else {
         infoEl.style.display = 'none';
     }
