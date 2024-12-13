@@ -224,7 +224,10 @@ function createWorker(self) {
     function packHalf2x16(x, y) {
         return (floatToHalf(x) | (floatToHalf(y) << 16)) >>> 0;
     }
-
+    function resetAllVisibility() {
+        visibilityMap.clear();
+        generateTexture(); // Regenerate texture with all objects visible
+    }
     function generateTexture() {
         if (!buffer) return;
         const f_buffer = new Float32Array(buffer);
@@ -541,7 +544,12 @@ function createWorker(self) {
         } else if (e.data.buffer) {
             buffer = e.data.buffer;
             vertexCount = e.data.vertexCount;
-        } else if(e.data.type === 'toggleVisibility') {
+
+        } else if (e.data.type === 'resetVisibility') {
+            resetAllVisibility();
+            self.postMessage({ type: 'visibilityReset' }); // Notify main thread
+        }
+        else if(e.data.type === 'toggleVisibility') {
             const label = e.data.label;
             if (label !== NO_SELECTION) {
                 visibilityMap.set(label, e.data.visible);
@@ -985,6 +993,8 @@ async function main() {
             selectedLabel = e.data.label;
             gl.uniform1i(u_selectedLabel, selectedLabel);
             updateSelectionInfo(selectedLabel);
+        } else if (e.data.type === 'visibilityReset') {
+            console.log("All objects visibility has been reset");
         } else if (e.data.buffer) {
             console.log("Received buffer from worker:", {
                 bufferSize: e.data.buffer.byteLength, receivedVertexCount: e.data.vertexCount
@@ -1223,12 +1233,8 @@ async function main() {
             resetAllDisplacements();
         }
         if (e.shiftKey && e.code === 'KeyR') {
-            // Loop through all labels and restore visibility
-            worker.postMessage({
-                type: 'toggleVisibility',
-                label: selectedLabel,
-                visible: true
-            });
+            worker.postMessage({ type: 'resetVisibility' });
+            console.log("Resetting visibility of all objects");
         }
     });
 
