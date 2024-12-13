@@ -1,4 +1,4 @@
-from plyfile import PlyData
+from plyfile import PlyData, PlyElement
 import numpy as np
 from scipy.spatial import KDTree
 import random
@@ -143,7 +143,7 @@ def k_means_with_color(points, k, colors, max_iter=100, tol=1e-4):
 
     #color by cluster
     for cluster in range(k):
-        cluster_color = np.array([random.random(), random.random(), random.random()])
+        cluster_color = np.array(COLORS[cluster%len(COLORS)])/255.0
         colors[labels == cluster] = cluster_color
 
     return centroids, labels, colors
@@ -164,17 +164,47 @@ def set_color(ply_data, colors, modified_path):
         PlyData(plydata.elements).write(f)
 
 
+def add_label_proberty(ply_data, output_ply, label):
+    """
+    Parameters:
+        input_ply (str): Path to the input PLY file.
+        output_ply (str): Path to save the output PLY file.
+        new_property (ndarray): Array of values for the label (shape: N,).
+    """
+    # Read the existing PLY file
+    vertex_data = plydata['vertex'].data
+    property_name = "label"
+
+    # Convert existing vertex data to a structured array
+    new_vertex_dtype = vertex_data.dtype.descr + [(property_name, 'i4')]  # Add new property type
+    new_vertex_data = np.empty(len(vertex_data), dtype=new_vertex_dtype)
+
+    # Copy old data and append the new property
+    for name in vertex_data.dtype.names:
+        new_vertex_data[name] = vertex_data[name]
+    new_vertex_data[property_name] = label
+
+    # Create new PlyElement with updated data
+    new_vertex_element = PlyElement.describe(new_vertex_data, 'vertex')
+
+    # Write the updated PLY file
+    PlyData([new_vertex_element], text=True).write(output_ply)
+    print(f"New PLY file with {property_name} added saved to {output_ply}")
+
 
 if __name__ == "__main__":
     file_path = r"C:\Users\onurb\master\computer_vision\projet\CSC_51073_EP-Project\CSC_51073_EP-Project\data\point_cloud.ply"
-    modified_path = r'3D_clustering\kmeans_color.ply'
+    modified_path = r'3D_clustering\kmeans_labeled.ply'
 
     with open(file_path, 'rb') as f:
         plydata = PlyData.read(f)    
 
     points, colors = get_vertex_info(plydata)
 
-    _,_, colors = k_means_with_color(points, 10, colors, max_iter=10)
+    _,labels, colors = k_means_with_color(points, 10, colors, max_iter=10)
     
-    set_color(plydata, colors, modified_path)
+    print(labels)
+
+    add_label_proberty(plydata, modified_path, labels)
+    #set_color(plydata, colors, modified_path)
 
