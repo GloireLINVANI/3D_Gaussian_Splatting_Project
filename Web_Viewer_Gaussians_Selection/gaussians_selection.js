@@ -187,6 +187,7 @@ function createWorker(self) {
     let lastVertexCount = 0;
     let labelData;  // New array to store labels
     let displacementMap = new Map(); // label -> (x,y,z) offset
+    let visibilityMap = new Map(); 
 
     var _floatView = new Float32Array(1);
     var _int32View = new Int32Array(_floatView.buffer);
@@ -241,23 +242,26 @@ function createWorker(self) {
     
         for (let i = 0; i < vertexCount; i++) {
             const label = labelData[i];
+            // Check if this splat should be visible
+            const isVisible = !visibilityMap.has(label) || visibilityMap.get(label);
+            
+            // If not visible, set alpha to 0
+            const alphaMultiplier = isVisible ? 1 : 0;
+            
             const displacement = displacementMap.get(label) || { x: 0, y: 0, z: 0 };
             
-            // Apply stored displacement to position
             texdata_f[8 * i + 0] = f_buffer[8 * i + 0] + displacement.x;
             texdata_f[8 * i + 1] = f_buffer[8 * i + 1] + displacement.y;
             texdata_f[8 * i + 2] = f_buffer[8 * i + 2] + displacement.z;
-            
-            // Store label
             texdata_f[8 * i + 3] = label;
     
-            // Rest of the texture generation remains the same
+            // Apply visibility to alpha channel
             texdata_c[4 * (8 * i + 7) + 0] = u_buffer[32 * i + 24 + 0];
             texdata_c[4 * (8 * i + 7) + 1] = u_buffer[32 * i + 24 + 1];
             texdata_c[4 * (8 * i + 7) + 2] = u_buffer[32 * i + 24 + 2];
-            texdata_c[4 * (8 * i + 7) + 3] = u_buffer[32 * i + 24 + 3];
+            texdata_c[4 * (8 * i + 7) + 3] = u_buffer[32 * i + 24 + 3] * alphaMultiplier;
     
-            // Quaternion handling remains the same
+            // Rest of the texture generation remains the same
             let scale = [f_buffer[8 * i + 3 + 0], f_buffer[8 * i + 3 + 1], f_buffer[8 * i + 3 + 2]];
             let rot = [
                 (u_buffer[32 * i + 28 + 0] - 128) / 128,
@@ -266,7 +270,7 @@ function createWorker(self) {
                 (u_buffer[32 * i + 28 + 3] - 128) / 128
             ];
     
-            // Matrix calculations remain the same
+            // Matrix calculations remain the same...
             const M = [
                 1.0 - 2.0 * (rot[2] * rot[2] + rot[3] * rot[3]),
                 2.0 * (rot[1] * rot[2] + rot[0] * rot[3]),
@@ -537,6 +541,12 @@ function createWorker(self) {
         } else if (e.data.buffer) {
             buffer = e.data.buffer;
             vertexCount = e.data.vertexCount;
+        } else if(e.data.type === 'toggleVisibility') {
+            const label = e.data.label;
+            if (label !== NO_SELECTION) {
+                visibilityMap.set(label, e.data.visible);
+                generateTexture(); // Regenerate texture to apply visibility changes
+            }
         } else if (e.data.vertexCount) {
             vertexCount = e.data.vertexCount;
         } else if (e.data.view) {
@@ -866,6 +876,20 @@ async function main() {
         console.log("All displacements have been reset");
     }
 
+    function resetVisibility() {
+        if (worker) {
+            for (const [label, _] of visibilityMap) {
+                worker.postMessage({
+                    type: 'toggleVisibility',
+                    label: label,
+                    visible: true
+                });
+            }
+            visibilityMap.clear();
+            console.log("Restored visibility of all objects");
+        }
+    }
+
     // Creating and compiling main vertex shader
     const vertexShader = gl.createShader(gl.VERTEX_SHADER);
     gl.shaderSource(vertexShader, vertexShaderSource);
@@ -1187,8 +1211,24 @@ async function main() {
                 updateSelectionInfo(selectedLabel);
             }
         }
+        if (e.key === 'Delete' && selectedLabel !== NO_SELECTION) {
+            worker.postMessage({
+                type: 'toggleVisibility',
+                label: selectedLabel,
+                visible: false
+            });
+            console.log(`Hidden object with label: ${selectedLabel}`);
+        }
         if (e.code === "KeyR") {
             resetAllDisplacements();
+        }
+        if (e.shiftKey && e.code === 'KeyR') {
+            // Loop through all labels and restore visibility
+            worker.postMessage({
+                type: 'toggleVisibility',
+                label: selectedLabel,
+                visible: true
+            });
         }
     });
 
