@@ -5,6 +5,7 @@ let viewMatrix = defaultViewMatrix;
 let selectionMode = false;  // Controls if selection mode is active
 const NO_SELECTION = -999999;  // A value that won't match any real label
 let selectedLabel = NO_SELECTION;  // Currently selected label
+let displacementManager; 
 
 const Z_NEAR = 0.2;
 const Z_FAR = 200;
@@ -227,57 +228,75 @@ function createWorker(self) {
         if (!buffer) return;
         const f_buffer = new Float32Array(buffer);
         const u_buffer = new Uint8Array(buffer);
-
-        var texwidth = 1024 * 2; // Set to your desired width
-        var texheight = Math.ceil((2 * vertexCount) / texwidth); // Set to your desired height
-        var texdata = new Uint32Array(texwidth * texheight * 4); // 4 components per pixel (RGBA)
+    
+        var texwidth = 1024 * 2;
+        var texheight = Math.ceil((2 * vertexCount) / texwidth);
+        var texdata = new Uint32Array(texwidth * texheight * 4);
         var texdata_c = new Uint8Array(texdata.buffer);
         var texdata_f = new Float32Array(texdata.buffer);
-
-        // Initializing labelData if needed
+    
         if (!labelData || labelData.length !== vertexCount) {
             labelData = new Int32Array(vertexCount);
         }
-
-        // Here we convert from a .splat file buffer into a texture
-        // With a little bit more foresight perhaps this texture file
-        // should have been the native format as it'd be very easy to
-        // load it into webgl.
+    
         for (let i = 0; i < vertexCount; i++) {
-            // x, y, z
-            texdata_f[8 * i + 0] = f_buffer[8 * i + 0];
-            texdata_f[8 * i + 1] = f_buffer[8 * i + 1];
-            texdata_f[8 * i + 2] = f_buffer[8 * i + 2];
-            // w = label
-            texdata_f[8 * i + 3] = labelData[i];
-
-            // r, g, b, a
+            const label = labelData[i];
+            const displacement = displacementMap.get(label) || { x: 0, y: 0, z: 0 };
+            
+            // Apply stored displacement to position
+            texdata_f[8 * i + 0] = f_buffer[8 * i + 0] + displacement.x;
+            texdata_f[8 * i + 1] = f_buffer[8 * i + 1] + displacement.y;
+            texdata_f[8 * i + 2] = f_buffer[8 * i + 2] + displacement.z;
+            
+            // Store label
+            texdata_f[8 * i + 3] = label;
+    
+            // Rest of the texture generation remains the same
             texdata_c[4 * (8 * i + 7) + 0] = u_buffer[32 * i + 24 + 0];
             texdata_c[4 * (8 * i + 7) + 1] = u_buffer[32 * i + 24 + 1];
             texdata_c[4 * (8 * i + 7) + 2] = u_buffer[32 * i + 24 + 2];
             texdata_c[4 * (8 * i + 7) + 3] = u_buffer[32 * i + 24 + 3];
-
-            // quaternions
-            let scale = [f_buffer[8 * i + 3 + 0], f_buffer[8 * i + 3 + 1], f_buffer[8 * i + 3 + 2],];
-            let rot = [(u_buffer[32 * i + 28 + 0] - 128) / 128, (u_buffer[32 * i + 28 + 1] - 128) / 128, (u_buffer[32 * i + 28 + 2] - 128) / 128, (u_buffer[32 * i + 28 + 3] - 128) / 128,];
-
-            // Compute the matrix product of S and R (M = S * R)
-            const M = [1.0 - 2.0 * (rot[2] * rot[2] + rot[3] * rot[3]), 2.0 * (rot[1] * rot[2] + rot[0] * rot[3]), 2.0 * (rot[1] * rot[3] - rot[0] * rot[2]),
-
-                2.0 * (rot[1] * rot[2] - rot[0] * rot[3]), 1.0 - 2.0 * (rot[1] * rot[1] + rot[3] * rot[3]), 2.0 * (rot[2] * rot[3] + rot[0] * rot[1]),
-
-                2.0 * (rot[1] * rot[3] + rot[0] * rot[2]), 2.0 * (rot[2] * rot[3] - rot[0] * rot[1]), 1.0 - 2.0 * (rot[1] * rot[1] + rot[2] * rot[2]),].map((k, i) => k * scale[Math.floor(i / 3)]);
-
-            const sigma = [M[0] * M[0] + M[3] * M[3] + M[6] * M[6], M[0] * M[1] + M[3] * M[4] + M[6] * M[7], M[0] * M[2] + M[3] * M[5] + M[6] * M[8], M[1] * M[1] + M[4] * M[4] + M[7] * M[7], M[1] * M[2] + M[4] * M[5] + M[7] * M[8], M[2] * M[2] + M[5] * M[5] + M[8] * M[8],];
-
+    
+            // Quaternion handling remains the same
+            let scale = [f_buffer[8 * i + 3 + 0], f_buffer[8 * i + 3 + 1], f_buffer[8 * i + 3 + 2]];
+            let rot = [
+                (u_buffer[32 * i + 28 + 0] - 128) / 128,
+                (u_buffer[32 * i + 28 + 1] - 128) / 128,
+                (u_buffer[32 * i + 28 + 2] - 128) / 128,
+                (u_buffer[32 * i + 28 + 3] - 128) / 128
+            ];
+    
+            // Matrix calculations remain the same
+            const M = [
+                1.0 - 2.0 * (rot[2] * rot[2] + rot[3] * rot[3]),
+                2.0 * (rot[1] * rot[2] + rot[0] * rot[3]),
+                2.0 * (rot[1] * rot[3] - rot[0] * rot[2]),
+                2.0 * (rot[1] * rot[2] - rot[0] * rot[3]),
+                1.0 - 2.0 * (rot[1] * rot[1] + rot[3] * rot[3]),
+                2.0 * (rot[2] * rot[3] + rot[0] * rot[1]),
+                2.0 * (rot[1] * rot[3] + rot[0] * rot[2]),
+                2.0 * (rot[2] * rot[3] - rot[0] * rot[1]),
+                1.0 - 2.0 * (rot[1] * rot[1] + rot[2] * rot[2])
+            ].map((k, i) => k * scale[Math.floor(i / 3)]);
+    
+            const sigma = [
+                M[0] * M[0] + M[3] * M[3] + M[6] * M[6],
+                M[0] * M[1] + M[3] * M[4] + M[6] * M[7],
+                M[0] * M[2] + M[3] * M[5] + M[6] * M[8],
+                M[1] * M[1] + M[4] * M[4] + M[7] * M[7],
+                M[1] * M[2] + M[4] * M[5] + M[7] * M[8],
+                M[2] * M[2] + M[5] * M[5] + M[8] * M[8]
+            ];
+    
             texdata[8 * i + 4] = packHalf2x16(4 * sigma[0], 4 * sigma[1]);
             texdata[8 * i + 5] = packHalf2x16(4 * sigma[2], 4 * sigma[3]);
             texdata[8 * i + 6] = packHalf2x16(4 * sigma[4], 4 * sigma[5]);
         }
-
+    
         self.postMessage({texdata, texwidth, texheight}, [texdata.buffer]);
     }
 
+    
     // Hit testing function for selection
     function performHitTesting(x, y, viewMatrix, projectionMatrix, viewport) {
         if (!buffer || !labelData) return NO_SELECTION;
@@ -561,31 +580,59 @@ precision highp float;
 precision highp int;
 
 uniform highp usampler2D u_texture;
-uniform mat4 projection, view;
+uniform mat4 projection;
+uniform mat4 view;
 uniform vec2 focal;
 uniform vec2 viewport;
+uniform bool uSelectionMode;
+uniform int uSelectedLabel;
+
+// Displacement uniforms
+uniform bool u_enableDisplacement;
+uniform vec3 u_displacementMap[100]; // Array to store displacements for different labels
+uniform int u_displacementLabels[100]; // Array to store which labels are displaced
+uniform int u_numDisplacements; // Number of active displacements
 
 in vec2 position;
 in int index;
 
-flat out int vLabel;  // Adding label as flat out variable
+flat out int vLabel;
 out vec4 vColor;
 out vec2 vPosition;
 
-void main() {
-    uvec4 cen = texelFetch(u_texture, ivec2((uint(index) & 0x3ffu) << 1, uint(index) >> 10), 0);
-    vec4 cam = view * vec4(uintBitsToFloat(cen.xyz), 1);
-    vec4 pos2d = projection * cam;
+// Function to get displacement for a label
+vec3 getDisplacement(int label) {
+    for(int i = 0; i < u_numDisplacements; i++) {
+        if(u_displacementLabels[i] == label) {
+            return u_displacementMap[i];
+        }
+    }
+    return vec3(0.0);
+}
 
+void main() {
+    // Fetch center and unpack data
+    uvec4 cen = texelFetch(u_texture, ivec2((uint(index) & 0x3ffu) << 1, uint(index) >> 10), 0);
+    vec3 centerPosition = uintBitsToFloat(cen.xyz);
+    vLabel = int(uintBitsToFloat(cen.w));
+    
+    // Apply displacement if enabled
+    if(u_enableDisplacement) {
+        centerPosition += getDisplacement(vLabel);
+    }
+    
+    // Transform position
+    vec4 cam = view * vec4(centerPosition, 1.0);
+    vec4 pos2d = projection * cam;
+    
     float clip = 1.2 * pos2d.w;
     if (pos2d.z < -clip || pos2d.x < -clip || pos2d.x > clip || pos2d.y < -clip || pos2d.y > clip) {
         gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
         return;
     }
 
+    // Covariance calculation 
     uvec4 cov = texelFetch(u_texture, ivec2(((uint(index) & 0x3ffu) << 1) | 1u, uint(index) >> 10), 0);
-// Get the label from the texture's w component
-    vLabel = int(uintBitsToFloat(cen.w));  // Using the label we stored in w component
     vec2 u1 = unpackHalf2x16(cov.x);
     vec2 u2 = unpackHalf2x16(cov.y);
     vec2 u3 = unpackHalf2x16(cov.z);
@@ -602,14 +649,16 @@ void main() {
 
     float mid = (cov2d[0][0] + cov2d[1][1]) / 2.0;
     float radius = length(vec2((cov2d[0][0] - cov2d[1][1]) / 2.0, cov2d[0][1]));
-    float lambda1 = mid + radius, lambda2 = mid - radius;
+    float lambda1 = mid + radius;
+    float lambda2 = mid - radius;
 
     if(lambda2 < 0.0) return;
     vec2 diagonalVector = normalize(vec2(cov2d[0][1], lambda1 - cov2d[0][0]));
     vec2 majorAxis = min(sqrt(2.0 * lambda1), 1024.0) * diagonalVector;
     vec2 minorAxis = min(sqrt(2.0 * lambda2), 1024.0) * vec2(diagonalVector.y, -diagonalVector.x);
 
-    vColor = clamp(pos2d.z/pos2d.w+1.0, 0.0, 1.0) * vec4((cov.w) & 0xffu, (cov.w >> 8) & 0xffu, (cov.w >> 16) & 0xffu, (cov.w >> 24) & 0xffu) / 255.0;
+    vColor = clamp(pos2d.z/pos2d.w+1.0, 0.0, 1.0) * 
+            vec4((cov.w) & 0xffu, (cov.w >> 8) & 0xffu, (cov.w >> 16) & 0xffu, (cov.w >> 24) & 0xffu) / 255.0;
     vPosition = position;
 
     vec2 vCenter = vec2(pos2d) / pos2d.w;
@@ -617,7 +666,8 @@ void main() {
         vCenter
         + position.x * majorAxis / viewport
         + position.y * minorAxis / viewport, 0.0, 1.0);
-}`.trim();
+}
+`.trim();
 
 const fragmentShaderSource = `#version 300 es
 precision highp float;
@@ -626,8 +676,7 @@ precision highp int;
 uniform bool uSelectionMode;
 uniform int uSelectedLabel;
 
-// Receive label from vertex shader
-flat in int vLabel;  // Adding label as flat in variable
+flat in int vLabel;
 in vec4 vColor;
 in vec2 vPosition;
 
@@ -639,8 +688,8 @@ void main() {
     float B = exp(A) * vColor.a;
     // Applying selection color if in selection mode and label matches
     vec3 finalColor = vColor.rgb;
-    if (uSelectionMode && vLabel == uSelectedLabel) {  
-        finalColor = mix(finalColor, vec3(1.0, 0.0, 0.0), 0.5); // Red highlight
+    if (uSelectionMode && vLabel == uSelectedLabel) {
+        finalColor = mix(finalColor, vec3(1.0, 0.0, 0.0), 0.5);
     }
     
     fragColor = vec4(B * finalColor, B);
@@ -721,7 +770,8 @@ async function main() {
     const gl = canvas.getContext("webgl2", {
         antialias: false,
     });
-
+    
+    
     // Setting up framebuffer
     const result = setupFramebuffer(gl);
     if (!result) {
@@ -729,44 +779,135 @@ async function main() {
         return;
     }
     const {framebuffer, colorTexture} = result;
+    function setupDisplacementUniforms(gl, program) {
+        // Get uniform locations
+        const uniforms = {
+            u_enableDisplacement: gl.getUniformLocation(program, "u_enableDisplacement"),
+            u_displacementMap: gl.getUniformLocation(program, "u_displacementMap"),
+            u_displacementLabels: gl.getUniformLocation(program, "u_displacementLabels"),
+            u_numDisplacements: gl.getUniformLocation(program, "u_numDisplacements")
+        };
+        
+        // Initialize arrays for displacements
+        const displacementMap = new Map(); // label -> [x, y, z]
+        let activeDisplacements = 0;
+        
+        // Function to update shader uniforms with current displacements
+        function updateDisplacementUniforms() {
+            const displacementArray = new Float32Array(300); // 100 vec3s
+            const labelArray = new Int32Array(100);
+            let index = 0;
+            
+            for (const [label, displacement] of displacementMap.entries()) {
+                labelArray[index] = label;
+                displacementArray[index * 3] = displacement[0];
+                displacementArray[index * 3 + 1] = displacement[1];
+                displacementArray[index * 3 + 2] = displacement[2];
+                index++;
+            }
+            
+            gl.uniform1i(uniforms.u_enableDisplacement, displacementMap.size > 0);
+            gl.uniform3fv(uniforms.u_displacementMap, displacementArray);
+            gl.uniform1iv(uniforms.u_displacementLabels, labelArray);
+            gl.uniform1i(uniforms.u_numDisplacements, displacementMap.size);
+        }
+        
+        return {
+            updateDisplacement: (label, dx = 0, dy = 0, dz = 0) => {
+                if (label === NO_SELECTION) return;
+                
+                const current = displacementMap.get(label) || [0, 0, 0];
+                current[0] += dx;
+                current[1] += dy;
+                current[2] += dz;
+                displacementMap.set(label, current);
+                
+                updateDisplacementUniforms();
+                saveDisplacements(displacementMap);
+            },
+            
+            resetDisplacements: () => {
+                displacementMap.clear();
+                updateDisplacementUniforms();
+                saveDisplacements(displacementMap);
+            },
+            
+            loadDisplacements: (savedDisplacements) => {
+                displacementMap.clear();
+                for (const [label, displacement] of Object.entries(savedDisplacements)) {
+                    displacementMap.set(parseInt(label), displacement);
+                }
+                updateDisplacementUniforms();
+            }
+        };
+    }
+    
+    function loadDisplacements() {
+        const saved = localStorage.getItem('splatDisplacements');
+        if (saved) {
+            const displacementsObj = JSON.parse(saved);
+            displacementManager.loadDisplacements(displacementsObj);
+        }
+    }
+    function updateSplatDisplacement(label, dx = 0, dy = 0, dz = 0) {
+        if (label === NO_SELECTION || !displacementManager) return;
+        displacementManager.updateDisplacement(label, dx, dy, dz);
+    }
+    
+    function saveDisplacements() {
+        const displacementsObj = Object.fromEntries(displacements);
+        localStorage.setItem('splatDisplacements', JSON.stringify(displacementsObj));
+    }
+
+    function resetAllDisplacements() {
+        if (!displacementManager) return;
+        
+        displacementManager.resetDisplacements();
+        console.log("All displacements have been reset");
+    }
 
     // Creating and compiling main vertex shader
     const vertexShader = gl.createShader(gl.VERTEX_SHADER);
     gl.shaderSource(vertexShader, vertexShaderSource);
     gl.compileShader(vertexShader);
     if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(vertexShader));
-
+    
     // Creating and compiling main fragment shader
     const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
     gl.shaderSource(fragmentShader, fragmentShaderSource);
     gl.compileShader(fragmentShader);
     if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(fragmentShader));
-
+    
     // Creating and linking main program
     const program = gl.createProgram();
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
     gl.useProgram(program);
-
+    
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(program));
-
+    displacementManager = setupDisplacementUniforms(gl, program);
+    
+    
     gl.disable(gl.DEPTH_TEST);
-
+    
     // Enabling blending
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(gl.ONE_MINUS_DST_ALPHA, gl.ONE, gl.ONE_MINUS_DST_ALPHA, gl.ONE,);
     gl.blendEquationSeparate(gl.FUNC_ADD, gl.FUNC_ADD);
-
+    
     // Getting uniform locations
+    // After the other uniform locations...
     const u_projection = gl.getUniformLocation(program, "projection");
     const u_viewport = gl.getUniformLocation(program, "viewport");
     const u_focal = gl.getUniformLocation(program, "focal");
     const u_view = gl.getUniformLocation(program, "view");
     const u_selectionMode = gl.getUniformLocation(program, 'uSelectionMode');
     const u_selectedLabel = gl.getUniformLocation(program, 'uSelectedLabel');
-
+    const u_enableDisplacement = gl.getUniformLocation(program, "u_enableDisplacement");
+    const u_displacement = gl.getUniformLocation(program, "u_displacement");
     // Initializing selection uniforms
+    const displacements = new Map(); // Track displacements by label
     gl.uniform1i(u_selectionMode, 0);
     gl.uniform1i(u_selectedLabel, NO_SELECTION);
 
@@ -1013,21 +1154,29 @@ async function main() {
 
 
 
-    function updateSplatDisplacement(label, dx = 0, dy = 0, dz = 0) {
+/*     function updateSplatDisplacement(label, dx = 0, dy = 0, dz = 0) {
         if (label === NO_SELECTION) return;
         
-        // Send displacement update to worker
-        worker.postMessage({ 
-            type: 'updateDisplacement',
-            label,
-            dx,
-            dy,
-            dz
-        });
-    }
+        // Update displacement map for the specific label
+        const current = displacements.get(label) || [0, 0, 0];
+        current[0] += dx;
+        current[1] += dy;
+        current[2] += dz;
+        displacements.set(label, current);
+        
+        // Save to localStorage
+        saveDisplacements();
+        
+        // Set the uniforms for the currently selected label
+        gl.uniform1i(u_enableDisplacement, 1);
+        gl.uniform3fv(u_displacement, new Float32Array(current));
+        gl.uniform1i(u_selectedLabel, label);
+    } */
 
     // Selection mode toggle
     document.addEventListener('keydown', (e) => {
+        carousel = false;
+    if (!activeKeys.includes(e.code)) activeKeys.push(e.code);
         if(e.key === 'Escape') {
             selectionMode = !selectionMode;
             console.log("Selection mode:", selectionMode ? "enabled" : "disabled");
@@ -1037,6 +1186,9 @@ async function main() {
                 gl.uniform1i(u_selectedLabel, selectedLabel); // Telling fragment shader to disable selection
                 updateSelectionInfo(selectedLabel);
             }
+        }
+        if (e.code === "KeyR") {
+            resetAllDisplacements();
         }
     });
 
@@ -1136,9 +1288,20 @@ async function main() {
             const splatMoveSpeed = 0.1; // Adjust speed as needed
             
             if (activeKeys.includes("KeyH")) {
+                updateSplatDisplacement(selectedLabel, -splatMoveSpeed, 0, 0);
+            }
+            if (activeKeys.includes("KeyK")) {
                 updateSplatDisplacement(selectedLabel, splatMoveSpeed, 0, 0);
             }
-
+            
+            // Up/Down
+            if (activeKeys.includes("KeyJ")) {
+                updateSplatDisplacement(selectedLabel, 0, splatMoveSpeed, 0);
+            }
+            if (activeKeys.includes("KeyU")) {
+                updateSplatDisplacement(selectedLabel, 0, -splatMoveSpeed, 0);
+            }
+            
         }
 
         const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -1205,14 +1368,14 @@ async function main() {
             }
         }
 
-        if (["KeyJ", "KeyK", "KeyL", "KeyI"].some((k) => activeKeys.includes(k))) {
+/*         if (["KeyJ", "KeyK", "KeyL", "KeyI"].some((k) => activeKeys.includes(k))) {
             let d = 4;
             inv = translateMatrix4(inv, 0, 0, d);
             inv = rotateMatrix4(inv, activeKeys.includes("KeyJ") ? -0.05 : activeKeys.includes("KeyL") ? 0.05 : 0, 0, 1, 0,);
             inv = rotateMatrix4(inv, activeKeys.includes("KeyI") ? 0.05 : activeKeys.includes("KeyK") ? -0.05 : 0, 1, 0, 0,);
             inv = translateMatrix4(inv, 0, 0, -d);
         }
-
+ */
         viewMatrix = invert4(inv);
 
         if (carousel) {
@@ -1242,7 +1405,25 @@ async function main() {
         const currentFps = 1000 / (now - lastFrame) || 0;
         avgFps = avgFps * 0.9 + currentFps * 0.1;
 
+        // Inside frame function, where we handle rendering
         if (vertexCount > 0) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.uniform1i(u_selectionMode, selectionMode ? 1 : 0);
+            gl.uniform1i(u_selectedLabel, selectedLabel);
+            gl.uniformMatrix4fv(u_view, false, actualViewMatrix);
+
+            // Handle displacement for currently selected label
+            if (selectedLabel !== NO_SELECTION && selectionMode) {
+                const displacement = displacements.get(selectedLabel) || [0, 0, 0];
+                gl.uniform1i(u_enableDisplacement, 1);
+                gl.uniform3fv(u_displacement, new Float32Array(displacement));
+            } else {
+                gl.uniform1i(u_enableDisplacement, 0);
+                gl.uniform3fv(u_displacement, new Float32Array([0, 0, 0]));
+            }
+
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, vertexCount);
             debugState()
             document.getElementById("spinner").style.display = "none";
             document.getElementById("message").style.display = "none"; // Added this for cleaner UI
@@ -1274,7 +1455,7 @@ async function main() {
         lastFrame = now;
         requestAnimationFrame(frame);
     };
-
+    loadDisplacements();
     frame();
 
     const isPly = (splatData) => splatData[0] == 112 && splatData[1] == 108 && splatData[2] == 121 && splatData[3] == 10;
@@ -1307,6 +1488,8 @@ async function main() {
                         buffer: splatData.buffer, vertexCount: Math.floor(splatData.length / rowLength),
                     });
                 }
+                loadDisplacements();
+
             };
             fr.readAsArrayBuffer(file);
         }
