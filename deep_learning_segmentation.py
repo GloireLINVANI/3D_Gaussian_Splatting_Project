@@ -8,7 +8,10 @@ import numpy as np
 import torch
 from PIL import Image
 from plyfile import PlyData, PlyElement
-from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
+from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation, SegformerImageProcessor, \
+    SegformerForSemanticSegmentation
+from ultralytics import YOLO
+import cv2
 
 
 def load_cameras(camera_file):
@@ -79,39 +82,98 @@ def project_gaussian(position, camera):
     return None
 
 
-def segment_image(image_path, output_dir, processor, model, device):
+def process_yolo_segmentation(model, image):
     """
-    Performing semantic segmentation on a single image
+    Processing YOLO instance segmentation results to create a segmentation map
+
+    Args:
+        model: YOLO11 instance segmentation model
+        image: PIL Image
+
+    Returns:
+        seg_map: segmentation map where each pixel value represents a class label
+    """
+    results = model(image, verbose=False)
+
+    orig_height, orig_width = results[0].orig_shape
+
+    # Creating an empty segmentation map filled with background (-1)
+    seg_map = np.full((orig_height, orig_width), -1, dtype=np.int32)
+
+    if len(results) == 0 or not hasattr(results[0], 'masks'):
+        return seg_map
+
+    masks = results[0].masks
+    boxes = results[0].boxes
+
+    if masks is None or boxes is None:
+        return seg_map
+
+    # Processing each detection (instance)
+    for mask, box in zip(masks.data, boxes):
+        class_id = box.cls.cpu().numpy()[0]  # Class ID
+        confidence = box.conf.cpu().numpy()[0]  # Confidence score
+
+        if confidence > 0.5:  # Confidence threshold
+            instance_mask = mask.cpu().numpy()
+
+            instance_mask = cv2.resize(instance_mask, (orig_width, orig_height), interpolation=cv2.INTER_NEAREST)
+            seg_map = np.where(instance_mask > 0.5, class_id,
+                               seg_map)  # Higher confidence instances overwrite lower ones
+
+    return seg_map.astype(np.int32)
+
+
+def segment_image(image_path, output_dir, processor, model, device, model_type):
+    """
+    Performing segmentation on a single image
     """
     os.makedirs(output_dir, exist_ok=True)
     image = Image.open(image_path)
 
     # print("Original image size:", image.size)
-    inputs = processor(images=image, return_tensors="pt")
-    inputs = {k: v.to(device) for k, v in inputs.items()}
+    if model_type == 'segformer':
+        # Segformer segmentation
+        inputs = processor(images=image, return_tensors="pt")
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
-    with torch.no_grad():
-        outputs = model(**inputs)
-        seg_map = outputs.logits.argmax(dim=1)[0].cpu().numpy()
+        with torch.no_grad():
+            outputs = model(**inputs)
+            seg_map = outputs.logits.argmax(dim=1)[0].cpu().numpy()
+    elif model_type == 'yolo':
+        # YOLO segmentation
+        seg_map = process_yolo_segmentation(model, image)
+    else:
+        # Mask2Former
+        inputs = processor(images=image, return_tensors="pt")
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+        # Processing Mask2Former outputs
+        result = processor.post_process_instance_segmentation(outputs, target_sizes=[image.size[::-1]])[0]
+
+        seg_map = result["segmentation"].cpu().numpy().astype(np.int32)
 
     # print("Segmentation map size:", seg_map.shape)
     # sys.exit()
 
-    # Saving segmentation map
     base_filename = os.path.splitext(os.path.basename(image_path))[0]
 
     np.save(os.path.join(output_dir, f"{base_filename}_segmap.npy"), seg_map)
 
-    def create_ade20k_label_colormap():
-        """Creates a colormap for the ADE20K dataset classes plus unknown label."""
-        num_classes = 150
+    def create_label_colormap(model_type):
+        """Creates a colormap for visualizing segmentation labels plus an extra slot for unknown (-1)"""
+        if (model_type == 'yolo'):
+            num_classes = 80
+        else:
+            num_classes = 150
         # Create colormap with an extra slot for unknown (-1)
         colormap = np.zeros((num_classes + 1, 3), dtype=np.uint8)
 
-        # Set a specific color for unknown label (black)
         colormap[0] = [0, 0, 0]  # Black for unknown
 
-        # Generate colors for actual classes
+        # Generating colors for actual classes
         for i in range(num_classes):
             # Generate distinct colors using HSV color space
             h = i / num_classes
@@ -124,16 +186,13 @@ def segment_image(image_path, output_dir, processor, model, device):
         return colormap
 
     # Create colored segmentation map
-    colormap = create_ade20k_label_colormap()
+    colormap = create_label_colormap(model_type)
 
-    # Shift labels to handle -1
-    # Convert -1 to 0, and shift other labels up by 1
     visualization_map = seg_map.copy()
-    visualization_map = visualization_map + 1  # Shift all labels up by 1
+    visualization_map = visualization_map + 1
 
     colored_seg_map = colormap[visualization_map]
 
-    # Save visualization with original image side by side
     plt.figure(figsize=(20, 10))
 
     # Original image
@@ -152,25 +211,39 @@ def segment_image(image_path, output_dir, processor, model, device):
                 pad_inches=0.1, dpi=300)
     plt.close()
 
-    # Save only the colored segmentation map
-    # plt.figure(figsize=(10, 10))
-    # plt.imshow(colored_seg_map.astype(np.uint8))
-    # plt.axis('off')
-    # plt.savefig(os.path.join(output_dir, f"{base_filename}_segmap_colored.png"), bbox_inches='tight', pad_inches=0,
-    #             dpi=300)
-    # plt.close()
-
     return seg_map
 
 
-def assign_semantic_labels(gaussians, cameras, input_dir, output_dir):
+def initialize_model(model_type, device):
     """
-    Assigning semantic labels to gaussians based on their projections in segmented images
+    Initializing the selected segmentation model
+    """
+    if model_type == 'segformer':
+        processor = SegformerImageProcessor.from_pretrained("nvidia/segformer-b5-finetuned-ade-640-640")
+        model = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b5-finetuned-ade-640-640")
+        model.to(device)
+        return processor, model
+    elif model_type == 'mask2former':
+        processor = AutoImageProcessor.from_pretrained("facebook/mask2former-swin-large-ade-semantic")
+        model = Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-large-ade-semantic")
+        model.to(device)
+        return processor, model
+
+    elif model_type == 'yolo':
+        model = YOLO("yolo11x-seg.pt")
+        return None, model
+
+    raise ValueError(f"Unknown model type: {model_type}")
+
+
+def assign_labels(gaussians, cameras, input_dir, output_dir, model_type='mask2former'):
+    """
+    Assigning labels to gaussians based on their projections in segmented images
     """
     # Setting up segmentation model
-    device = torch.device('cuda' if torch.cuda.is_available() else 'mps')
-    processor = SegformerImageProcessor.from_pretrained("nvidia/segformer-b5-finetuned-ade-640-640")
-    model = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b5-finetuned-ade-640-640")
+    device = torch.device(
+        'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+    processor, model = initialize_model(model_type, device)
     model.to(device)
 
     # Dictionary to store votes for each gaussian
@@ -185,11 +258,10 @@ def assign_semantic_labels(gaussians, cameras, input_dir, output_dir):
         print(f"Processing image {os.path.basename(img_path)}...")
         image = Image.open(img_path)
 
-        # Getting original image size
         orig_width, orig_height = image.size[0], image.size[1]
 
         # Getting segmentation map for this view
-        seg_map = segment_image(img_path, output_dir, processor, model, device)
+        seg_map = segment_image(img_path, output_dir, processor, model, device, model_type)
         seg_width, seg_height = seg_map.shape[1], seg_map.shape[0]
 
         # Computing scaling factors
@@ -236,12 +308,12 @@ def assign_semantic_labels(gaussians, cameras, input_dir, output_dir):
 
 def save_labeled_ply(output_file, plydata, labels):
     """
-    Saving gaussians with semantic labels to new PLY file
+    Saving gaussians with labels to new PLY file
     """
     vertices = plydata['vertex']
 
-    # Creating new vertex type with semantic label
-    vertex_dtype = vertices.data.dtype.descr + [('semantic_label', 'i4')]
+    # Creating new vertex type with label
+    vertex_dtype = vertices.data.dtype.descr + [('label', 'i4')]
 
     # Creating new vertex data
     new_vertices = np.empty(len(vertices), dtype=vertex_dtype)
@@ -250,21 +322,23 @@ def save_labeled_ply(output_file, plydata, labels):
     for name in vertices.data.dtype.names:
         new_vertices[name] = vertices[name]
 
-    # Adding semantic labels
-    new_vertices['semantic_label'] = labels
+    # Adding labels
+    new_vertices['label'] = labels
 
     # Creating new PLY element and file
     vertex_element = PlyElement.describe(new_vertices, 'vertex')
-    PlyData([vertex_element]).write(output_file)
+    PlyData([vertex_element], text=False).write(output_file)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Add semantic labels to gaussian PLY file')
-    parser.add_argument('ply_file', help='Input PLY file with gaussian data')
-    parser.add_argument('camera_file', help='JSON file with camera data')
-    parser.add_argument('input_dir', help='Directory containing input images')
-    parser.add_argument('output_dir', help='Output directory to saved segmented input images')
-    parser.add_argument('output_file', help='Output PLY file with semantic labels')
+    parser = argparse.ArgumentParser(description='Add labels to gaussian PLY file')
+    parser.add_argument('--ply_file', help='Input PLY file with gaussian data')
+    parser.add_argument('--camera_file', help='JSON file with camera data')
+    parser.add_argument('--input_dir', help='Directory containing input images')
+    parser.add_argument('--output_dir', help='Output directory to saved segmented input images')
+    parser.add_argument('--output_file', help='Output PLY file with labels')
+    parser.add_argument('--model', choices=['segformer', 'mask2former', 'yolo'], default='mask2former',
+                        help='Choose segmentation model: mask2former or yolo')
     args = parser.parse_args()
 
     # Loading data
@@ -274,9 +348,9 @@ def main():
     print("Loading gaussians...")
     gaussians, plydata = load_gaussians(args.ply_file)
 
-    # Assigning semantic labels
-    print("Assigning semantic labels...")
-    labels = assign_semantic_labels(gaussians, cameras, args.input_dir, args.output_dir)
+    # Assigning labels
+    print("Assigning labels...")
+    labels = assign_labels(gaussians, cameras, args.input_dir, args.output_dir, model_type=args.model)
 
     # Saving results
     print("Saving labeled PLY file...")

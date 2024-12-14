@@ -10,7 +10,6 @@ let displacementManager;
 const Z_NEAR = 0.2;
 const Z_FAR = 200;
 
-let colorMap = new Map(); // label -> [r,g,b] values
 let colorManager; // Will be initialized in main()
 
 function setupColorUniforms(gl, program) {
@@ -20,16 +19,16 @@ function setupColorUniforms(gl, program) {
         u_customColorLabels: gl.getUniformLocation(program, "u_customColorLabels"),
         u_numCustomColors: gl.getUniformLocation(program, "u_numCustomColors")
     };
-    
+
     // Initialize color map
     const colorMap = new Map();
-    
+
     // Function to update shader uniforms with current colors
     function updateColorUniforms() {
         const colorArray = new Float32Array(300); // 100 vec3s
         const labelArray = new Int32Array(100);
         let index = 0;
-        
+
         for (const [label, color] of colorMap.entries()) {
             labelArray[index] = label;
             colorArray[index * 3] = color[0];
@@ -37,30 +36,30 @@ function setupColorUniforms(gl, program) {
             colorArray[index * 3 + 2] = color[2];
             index++;
         }
-        
+
         gl.uniform3fv(uniforms.u_customColors, colorArray);
         gl.uniform1iv(uniforms.u_customColorLabels, labelArray);
         gl.uniform1i(uniforms.u_numCustomColors, colorMap.size);
     }
-    
+
     return {
         updateColor: (label, color) => {
             if (label === NO_SELECTION) return;
             colorMap.set(label, color);
             updateColorUniforms();
         },
-        
+
         resetColor: (label) => {
             if (label === NO_SELECTION) return;
             colorMap.delete(label);
             updateColorUniforms();
         },
-        
+
         resetAllColors: () => {
             colorMap.clear();
             updateColorUniforms();
         },
-        
+
         updateColorUniforms
     };
 }
@@ -847,11 +846,10 @@ async function main() {
 
     const downsample = 1 / devicePixelRatio;
 
-    const colorControls = document.getElementById('color-controls');
     const colorPicker = document.getElementById('color-picker');
     const applyColorBtn = document.getElementById('apply-color');
     const resetColorBtn = document.getElementById('reset-color');
-    
+
 
     document.getElementById("spinner").style.display = "none";
     document.getElementById("message").innerText = "Drop a .ply file to view";
@@ -977,22 +975,24 @@ async function main() {
         const infoEl = document.getElementById('selection-info');
         const objectEl = document.getElementById('selected-object');
         const colorControls = document.getElementById('color-controls');
-    
+
         console.log('Selection update:', {
             label,
             selectionMode,
             colorControlsExists: !!colorControls,
             infoElExists: !!infoEl
         }); // Debug log
-    
+
         if (label >= 0 && selectionMode) {
             infoEl.style.display = 'block';
-            objectEl.textContent = labels[label];
+            objectEl.textContent = label//labels[label];
             colorControls.classList.add('visible');
             console.log('Color controls should be visible now:', colorControls.classList.contains('visible')); // Debug log
         } else {
-            infoEl.style.display = 'none';
-            colorControls.classList.remove('visible');
+            if (!selectionMode) {
+                infoEl.style.display = 'none';
+                colorControls.classList.remove('visible');
+            }
         }
     }
 
@@ -1022,8 +1022,7 @@ async function main() {
     displacementManager = setupDisplacementUniforms(gl, program);
     colorManager = setupColorUniforms(gl, program); // Add this line
 
-    
-    
+
     gl.disable(gl.DEPTH_TEST);
 
     // Enabling blending
@@ -1130,13 +1129,13 @@ async function main() {
     // Handle color application
     applyColorBtn.addEventListener('click', () => {
         if (selectedLabel === NO_SELECTION) return;
-        
+
         const color = colorPicker.value;
         // Convert hex to RGB (0-1 range)
-        const r = parseInt(color.substr(1,2), 16) / 255;
-        const g = parseInt(color.substr(3,2), 16) / 255;
-        const b = parseInt(color.substr(5,2), 16) / 255;
-        
+        const r = parseInt(color.substr(1, 2), 16) / 255;
+        const g = parseInt(color.substr(3, 2), 16) / 255;
+        const b = parseInt(color.substr(5, 2), 16) / 255;
+
         colorManager.updateColor(selectedLabel, [r, g, b]);
     });
 
@@ -1583,10 +1582,10 @@ async function main() {
             gl.uniform1i(u_selectedLabel, selectedLabel);
             gl.uniformMatrix4fv(u_view, false, actualViewMatrix);
 
-            
+
             colorManager.updateColorUniforms();
 
-            
+
             // Handle displacement for currently selected label
             if (selectedLabel !== NO_SELECTION && selectionMode) {
                 const displacement = displacements.get(selectedLabel) || [0, 0, 0];
@@ -1694,17 +1693,6 @@ async function main() {
     });
 }
 
-function updateSelectionInfo(label) {
-    const infoEl = document.getElementById('selection-info');
-    const objectEl = document.getElementById('selected-object');
-
-    if (label >= 0 && selectionMode) {
-        infoEl.style.display = 'block';
-        objectEl.textContent = label//labels[label];
-    } else {
-        infoEl.style.display = 'none';
-    }
-}
 
 let cameras, camera, labels;
 Promise.all([fetch('cameras.json'), fetch('ade20k-id2label.json')]).then(responses =>
