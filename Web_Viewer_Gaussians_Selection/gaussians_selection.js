@@ -360,12 +360,13 @@ function createWorker(self) {
     }
 
 
-    // Hit testing function for selection
+    // Hit testing function for selection with depth testing
     function performHitTesting(x, y, viewMatrix, projectionMatrix, viewport) {
         if (!buffer || !labelData) return NO_SELECTION;
 
         const combinedMatrix = multiply4(projectionMatrix, viewMatrix);
         let closestDist = Infinity;
+        let closestDepth = Infinity; // Variable to track the closest depth
         let selectedLabel = NO_SELECTION;
         const f_buffer = new Float32Array(buffer);
 
@@ -378,21 +379,34 @@ function createWorker(self) {
             if (!projected) continue;
 
             // Converting to screen coordinates
-            const screenX = (projected[0] / projected[3] + 1) * 0.5 * viewport[0]
-            const screenY = (projected[1] / projected[3] + 1) * 0.5 * viewport[1]
+            const screenX = (projected[0] / projected[3] + 1) * 0.5 * viewport[0];
+            const screenY = (projected[1] / projected[3] + 1) * 0.5 * viewport[1];
+            const depth = projected[2] / projected[3]; // Normalized device coordinates (NDC) depth
 
             // Calculating distance to click point
             const dist = Math.hypot(screenX - x, screenY - y);
 
-            // Updating if this is the closest point within threshold
-            if (dist < closestDist && dist < 10) { // 10 pixel threshold
+            // Updating if this is the closest point within threshold and with nearest depth
+            if (dist < 10 && (dist < closestDist || (dist === closestDist && depth < closestDepth))) {
                 closestDist = dist;
+                closestDepth = depth; // Update closest depth
                 selectedLabel = labelData[i];
             }
         }
 
         return selectedLabel;
     }
+
+// Projection function remains unchanged
+    function project(pos, matrix) {
+        const result = [0, 0, 0, 0];
+        for (let i = 0; i < 4; i++) {
+            result[i] = pos[0] * matrix[i] + pos[1] * matrix[i + 4] + pos[2] * matrix[i + 8] + pos[3] * matrix[i + 12];
+        }
+        if (result[3] <= 0) return null;
+        return result;
+    }
+
 
     function project(pos, matrix) {
         const result = [0, 0, 0, 0];
@@ -985,7 +999,7 @@ async function main() {
 
         if (label >= 0 && selectionMode) {
             infoEl.style.display = 'block';
-            objectEl.textContent = label//labels[label];
+            objectEl.textContent = label// + ' ' + labels[label];
             colorControls.classList.add('visible');
             console.log('Color controls should be visible now:', colorControls.classList.contains('visible')); // Debug log
         } else {
@@ -1694,7 +1708,6 @@ async function main() {
 }
 
 
-//let cameras, camera,
 let labels;
 let cameras = [
     {
@@ -1853,8 +1866,8 @@ let cameras = [
     },
 ];
 
-let camera = cameras[0];
-/*
+let camera = cameras[0]
+/*let cameras, camera, labels
 Promise.all([fetch('cameras.json'), fetch('ade20k-id2label.json')]).then(responses =>
     Promise.all(responses.map(response => response.json())).then(data => {
         cameras = data[0];
@@ -1865,6 +1878,7 @@ Promise.all([fetch('cameras.json'), fetch('ade20k-id2label.json')]).then(respons
     document.getElementById("spinner").style.display = "none";
     document.getElementById("message").innerText = err.toString();
 })*/
+
 fetch('ade20k-id2label.json').then(response => response.json()).then(data => {
     labels = data;
     main();

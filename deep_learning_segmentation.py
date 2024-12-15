@@ -140,6 +140,8 @@ def segment_image(image_path, output_dir, processor, model, device, model_type):
         with torch.no_grad():
             outputs = model(**inputs)
             seg_map = outputs.logits.argmax(dim=1)[0].cpu().numpy()
+            # resizing segmentation map to original image size
+            seg_map = cv2.resize(seg_map, (image.size[0], image.size[1]), interpolation=cv2.INTER_NEAREST)
     elif model_type == 'yolo':
         # YOLO segmentation
         seg_map = process_yolo_segmentation(model, image)
