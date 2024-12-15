@@ -13,14 +13,13 @@ const Z_FAR = 200;
 let colorManager; // Will be initialized in main()
 
 function setupColorUniforms(gl, program) {
-    // Get uniform locations
+    // Getting uniform locations
     const uniforms = {
         u_customColors: gl.getUniformLocation(program, "u_customColors"),
         u_customColorLabels: gl.getUniformLocation(program, "u_customColorLabels"),
         u_numCustomColors: gl.getUniformLocation(program, "u_numCustomColors")
     };
 
-    // Initialize color map
     const colorMap = new Map();
 
     // Function to update shader uniforms with current colors
@@ -281,7 +280,7 @@ function createWorker(self) {
 
     function resetAllVisibility() {
         visibilityMap.clear();
-        generateTexture(); // Regenerate texture with all objects visible
+        generateTexture(); // Regenerating texture with all objects visible
     }
 
     function generateTexture() {
@@ -301,7 +300,7 @@ function createWorker(self) {
 
         for (let i = 0; i < vertexCount; i++) {
             const label = labelData[i];
-            // Check if this splat should be visible
+            // Checking if this splat should be visible
             const isVisible = !visibilityMap.has(label) || visibilityMap.get(label);
 
             // If not visible, set alpha to 0
@@ -314,13 +313,12 @@ function createWorker(self) {
             texdata_f[8 * i + 2] = f_buffer[8 * i + 2] + displacement.z;
             texdata_f[8 * i + 3] = label;
 
-            // Apply visibility to alpha channel
+            // Applying visibility to alpha channel
             texdata_c[4 * (8 * i + 7) + 0] = u_buffer[32 * i + 24 + 0];
             texdata_c[4 * (8 * i + 7) + 1] = u_buffer[32 * i + 24 + 1];
             texdata_c[4 * (8 * i + 7) + 2] = u_buffer[32 * i + 24 + 2];
             texdata_c[4 * (8 * i + 7) + 3] = u_buffer[32 * i + 24 + 3] * alphaMultiplier;
 
-            // Rest of the texture generation remains the same
             let scale = [f_buffer[8 * i + 3 + 0], f_buffer[8 * i + 3 + 1], f_buffer[8 * i + 3 + 2]];
             let rot = [
                 (u_buffer[32 * i + 28 + 0] - 128) / 128,
@@ -329,7 +327,6 @@ function createWorker(self) {
                 (u_buffer[32 * i + 28 + 3] - 128) / 128
             ];
 
-            // Matrix calculations remain the same...
             const M = [
                 1.0 - 2.0 * (rot[2] * rot[2] + rot[3] * rot[3]),
                 2.0 * (rot[1] * rot[2] + rot[0] * rot[3]),
@@ -389,7 +386,7 @@ function createWorker(self) {
             // Updating if this is the closest point within threshold and with nearest depth
             if (dist < 10 && (dist < closestDist || (dist === closestDist && depth < closestDepth))) {
                 closestDist = dist;
-                closestDepth = depth; // Update closest depth
+                closestDepth = depth;
                 selectedLabel = labelData[i];
             }
         }
@@ -397,7 +394,6 @@ function createWorker(self) {
         return selectedLabel;
     }
 
-// Projection function remains unchanged
     function project(pos, matrix) {
         const result = [0, 0, 0, 0];
         for (let i = 0; i < 4; i++) {
@@ -617,12 +613,12 @@ function createWorker(self) {
 
         } else if (e.data.type === 'resetVisibility') {
             resetAllVisibility();
-            self.postMessage({type: 'visibilityReset'}); // Notify main thread
+            self.postMessage({type: 'visibilityReset'}); // Notifying main thread
         } else if (e.data.type === 'toggleVisibility') {
             const label = e.data.label;
             if (label !== NO_SELECTION) {
                 visibilityMap.set(label, e.data.visible);
-                generateTexture(); // Regenerate texture to apply visibility changes
+                generateTexture(); // Regenerating texture to apply visibility changes
             }
         } else if (e.data.vertexCount) {
             vertexCount = e.data.vertexCount;
@@ -634,7 +630,7 @@ function createWorker(self) {
             const selectedLabel = performHitTesting(e.data.x, e.data.y, e.data.viewMatrix, e.data.projectionMatrix, e.data.viewport);
             self.postMessage({type: 'selection', label: selectedLabel});
         } else if (e.data.type === 'updateDisplacement') {
-            // Handle displacement updates
+            // Handling displacement updates
             const {label, dx, dy, dz} = e.data;
             let displacement = displacementMap.get(label) || {x: 0, y: 0, z: 0};
             displacement.x += dx;
@@ -642,7 +638,7 @@ function createWorker(self) {
             displacement.z += dz;
             displacementMap.set(label, displacement);
 
-            // Update positions in the buffer
+            // Updating positions in the buffer
             if (buffer) {
                 const f_buffer = new Float32Array(buffer);
                 for (let i = 0; i < vertexCount; i++) {
@@ -654,7 +650,7 @@ function createWorker(self) {
                         f_buffer[positionOffset + 2] += dz;
                     }
                 }
-                // regenerate the texture after moving things around
+                // regenerating the texture after moving things around
                 generateTexture();
                 self.postMessage({buffer: buffer, vertexCount: vertexCount});
             }
@@ -662,7 +658,6 @@ function createWorker(self) {
     };
 }
 
-// Original vertex shader code from main.js
 const vertexShaderSource = `#version 300 es
 precision highp float;
 precision highp int;
@@ -699,17 +694,15 @@ vec3 getDisplacement(int label) {
 }
 
 void main() {
-    // Fetch center and unpack data
     uvec4 cen = texelFetch(u_texture, ivec2((uint(index) & 0x3ffu) << 1, uint(index) >> 10), 0);
     vec3 centerPosition = uintBitsToFloat(cen.xyz);
     vLabel = int(uintBitsToFloat(cen.w));
     
-    // Apply displacement if enabled
+    // Applying displacement if enabled
     if(u_enableDisplacement) {
         centerPosition += getDisplacement(vLabel);
     }
     
-    // Transform position
     vec4 cam = view * vec4(centerPosition, 1.0);
     vec4 pos2d = projection * cam;
     
@@ -793,12 +786,12 @@ void main() {
     // Applying selection color if in selection mode and label matches
     vec3 finalColor = getCustomColor(vLabel);
 
-    // Apply custom color if enabled
+    // Applying custom color if enabled
     if (u_enableCustomColor && vLabel == uSelectedLabel) {
         finalColor = u_customColor;
     }
 
-    // Apply selection highlight if in selection mode
+    // Applying selection highlight if in selection mode
     if (uSelectionMode && vLabel == uSelectedLabel) {
         finalColor = mix(finalColor, vec3(1.0, 0.0, 0.0), 0.5);
     }
@@ -897,7 +890,7 @@ async function main() {
     const {framebuffer, colorTexture} = result;
 
     function setupDisplacementUniforms(gl, program) {
-        // Get uniform locations
+        // Getting uniform locations
         const uniforms = {
             u_enableDisplacement: gl.getUniformLocation(program, "u_enableDisplacement"),
             u_displacementMap: gl.getUniformLocation(program, "u_displacementMap"),
@@ -905,7 +898,7 @@ async function main() {
             u_numDisplacements: gl.getUniformLocation(program, "u_numDisplacements")
         };
 
-        // Initialize arrays for displacements
+        // Initializing arrays for displacements
         const displacementMap = new Map(); // label -> [x, y, z]
         let activeDisplacements = 0;
 
@@ -1034,7 +1027,7 @@ async function main() {
 
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(program));
     displacementManager = setupDisplacementUniforms(gl, program);
-    colorManager = setupColorUniforms(gl, program); // Add this line
+    colorManager = setupColorUniforms(gl, program);
 
 
     gl.disable(gl.DEPTH_TEST);
@@ -1140,12 +1133,12 @@ async function main() {
     let activeKeys = [];
     let currentCameraIndex = 0;
 
-    // Handle color application
+    // Handling color application
     applyColorBtn.addEventListener('click', () => {
         if (selectedLabel === NO_SELECTION) return;
 
         const color = colorPicker.value;
-        // Convert hex to RGB (0-1 range)
+        // Converting hex to RGB (0-1 range)
         const r = parseInt(color.substr(1, 2), 16) / 255;
         const g = parseInt(color.substr(3, 2), 16) / 255;
         const b = parseInt(color.substr(5, 2), 16) / 255;
@@ -1153,7 +1146,7 @@ async function main() {
         colorManager.updateColor(selectedLabel, [r, g, b]);
     });
 
-    // Handle color reset
+    // Handling color reset
     resetColorBtn.addEventListener('click', () => {
         if (selectedLabel === NO_SELECTION) return;
         colorManager.resetColor(selectedLabel);
@@ -1371,7 +1364,7 @@ async function main() {
             worker.postMessage({type: 'resetVisibility'});
             console.log("Resetting visibility of all objects");
         }
-        if (e.code === "KeyC") {  // Reset all colors when pressing 'C'
+        if (e.code === "KeyC") {
             colorManager.resetAllColors();
         }
     });
@@ -1600,7 +1593,7 @@ async function main() {
             colorManager.updateColorUniforms();
 
 
-            // Handle displacement for currently selected label
+            // Handling displacement for currently selected label
             if (selectedLabel !== NO_SELECTION && selectionMode) {
                 const displacement = displacements.get(selectedLabel) || [0, 0, 0];
                 gl.uniform1i(u_enableDisplacement, 1);
