@@ -333,8 +333,8 @@ def save_labeled_ply(output_file, plydata, labels):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Add labels to gaussian PLY file')
-    parser.add_argument('--ply_file', help='Input PLY file with gaussian data')
+    parser = argparse.ArgumentParser(description='Add labels to gaussians PLY file')
+    parser.add_argument('--ply_file', help='Input PLY file with gaussians data')
     parser.add_argument('--camera_file', help='JSON file with camera data')
     parser.add_argument('--input_dir', help='Directory containing input images')
     parser.add_argument('--output_dir', help='Output directory to saved segmented input images')

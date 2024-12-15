@@ -2,6 +2,8 @@ from plyfile import PlyData, PlyElement
 import numpy as np
 from scipy.spatial import KDTree
 import random
+import argparse
+
 
 COLORS = [[252,199,55],[242,107,15],[231,56,121],[126,24,145], [247,44,91],[255,116,139],[167,212,119],[228,241,172]]
 
@@ -192,19 +194,23 @@ def add_label_proberty(ply_data, output_ply, label):
     print(f"New PLY file with {property_name} added saved to {output_ply}")
 
 
-if __name__ == "__main__":
-    file_path = r"C:\Users\onurb\master\computer_vision\projet\CSC_51073_EP-Project\CSC_51073_EP-Project\data\point_cloud.ply"
-    modified_path = r'3D_clustering\kmeans_labeled.ply'
 
-    with open(file_path, 'rb') as f:
-        plydata = PlyData.read(f)    
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="K-means clustering on a point cloud.")
+    parser.add_argument('--file_path', type=str, required=True, help='Path to the input PLY file.')
+    parser.add_argument('--save_path', type=str, required=True, help='Path to save the modified PLY file.')
+    parser.add_argument('--k', type=int, default=10, help='Number of clusters for k-means.')
+    args = parser.parse_args()
+
+    with open(args.file_path, 'rb') as f:
+        plydata = PlyData.read(f)
 
     points, colors = get_vertex_info(plydata)
 
-    _,labels, colors = k_means_with_color(points, 10, colors, max_iter=10)
-    
+    _, labels, colors = k_means_with_color(points, args.k, colors, max_iter=10)
+
     print(labels)
 
-    add_label_proberty(plydata, modified_path, labels)
+    add_label_proberty(plydata, args.save_path, labels)
     #set_color(plydata, colors, modified_path)
 

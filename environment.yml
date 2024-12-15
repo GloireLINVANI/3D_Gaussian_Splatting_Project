@@ -1,0 +1,16 @@
+name: 3D_gaussian_splatting_project
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python
+  - numpy
+  - torch
+  - transformers
+  - matplotlib
+  - pillow
+  - plyfile
+  - scipy
+  - opencv
+  - argparse
+  - ultralytics
